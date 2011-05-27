@@ -124,4 +124,7 @@ class Freckle(object):
 
     def yaml_as_python(self, val):
         """Convert YAML to dict"""
-        return yaml.load(val)
+        try:
+            return yaml.load(val)
+        except Exception, e:
+            return dict()
