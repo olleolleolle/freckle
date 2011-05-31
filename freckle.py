@@ -5,26 +5,7 @@ import urllib
 
 import httplib2
 import iso8601
-import yaml
-# Ugh, this is sad...
-ETREE_MODULES = [
-    'lxml.etree',
-    'xml.etree.cElementTree',
-    'cElementTree',
-    'xml.etree.ElementTree',
-    'elementtree.ElementTree',
-]
-etree = None
-for name in ETREE_MODULES:
-    try:
-        etree = __import__(name, '', '', [''])
-        break
-    except ImportError:
-        continue
-if etree is None:
-    raise ImportError("Failed to import ElementTree from any known place")
-
-
+import json
 
 class Freckle(object):
     """Class for interacting with the Freckle API"""
@@ -38,7 +19,7 @@ class Freckle(object):
         """Make a request to Freckle and return Python objects"""
         resp, content = self.http.request(url, method, body, 
                                           headers=self.headers)
-        return self.parse_response(content)
+        return json.loads(content)
 
     def get_entries(self, **kwargs):
         """
@@ -71,45 +52,29 @@ class Freckle(object):
                 val = "false"
             search_args['search[billable]'] = val
         query = urllib.urlencode(search_args)
-        return self.request("%s/entries.xml?%s" % (self.endpoint, query))
+        entry_data = self.request("%s/entries.json?%s" % (self.endpoint, query))
+        entries = dict()
+        for entry in entry_data:
+            entries[entry['entry']['id']] = entry['entry']
+        return entries
 
     def get_users(self):
-        """Get users from Freckle"""
-        return self.request("%s/users.xml" % self.endpoint)
+        """Return users as dict, keyed on ID"""
+        users = dict()
+        for user in self.request("%s/users.json" % self.endpoint):
+            users[user['user']['id']] = user['user']
+        return users
 
     def get_projects(self):
-        """Get projects from Freckle"""
-        return self.request("%s/projects.xml" % self.endpoint)
+        """Returns projects defined Freckle as a dict, keyed on project id."""
+        projects = dict()
+        for project in self.request("%s/projects.json" % self.endpoint):
+            project_item = project['project']
+            project_item['created_at'] = self.datetime_as_python(project_item['created_at'])
+            project_item['updated_at'] = self.datetime_as_python(project_item['updated_at'])
+            projects[project['project']['id']] = project_item
+        return projects
     
-    def parse_response(self, xml_content):
-        """Parse XML response into Python"""
-        content = []
-        tree = etree.parse(StringIO(xml_content))
-        for elem in tree.getroot().getchildren():
-            as_dict = {}
-            for item in elem.getchildren():
-                if item.get("type") and item.text:
-                    parser = "%s_as_python" % item.get("type")
-                    as_python = getattr(self, parser)(item.text)
-                elif item.get("type"):
-                    as_python = None
-                else:
-                    as_python = item.text
-                as_dict[item.tag] = as_python
-            content.append(as_dict)
-        return content
-
-    def boolean_as_python(self, val):
-        """Convert text to boolean"""
-        if val == 'true':
-            return True
-        else:
-            return False
-        
-    def date_as_python(self, val):
-        """Convert text to date"""
-        return datetime.date(*[int(x) for x in val.split("-")])
-
     def datetime_as_python(self, val):
         """Convert text to datetime"""
         return iso8601.parse_date(val)
@@ -117,14 +82,3 @@ class Freckle(object):
     def integer_as_python(self, val):
         """Convert text to integer"""
         return int(val)
-
-    def array_as_python(self, val):
-        """Convert text to list"""
-        return val.split(",")
-
-    def yaml_as_python(self, val):
-        """Convert YAML to dict"""
-        try:
-            return yaml.load(val)
-        except Exception, e:
-            return dict()
